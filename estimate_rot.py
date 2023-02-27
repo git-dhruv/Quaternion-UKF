@@ -40,14 +40,16 @@ class ukfPipeline:
         return self.parseAccelerometer(accel), self.parseGyro(gyro)
 
     def parseAccelerometer(self, accel):
-        rawReading = (accel - self.acc_bias) * (3300 / (1023 * self.acc_sens)) * 9.81
+        rawReading = (accel - self.acc_bias) * \
+            (3300 / (1023 * self.acc_sens)) * 9.81
         # Inverting first 2 rows according to the datasheet
         rawReading[:2, :] *= -1
         return rawReading
 
     def convertAcc2Angle(self):
         # Pitch is tan2(y/z)
-        roll = np.arctan2(self.accel[1, :].flatten(), self.accel[2, :].flatten())
+        roll = np.arctan2(self.accel[1, :].flatten(),
+                          self.accel[2, :].flatten())
         pitch = np.arctan2(
             -self.accel[0, :].flatten(),
             np.linalg.norm(self.accel[1:, :], axis=0).flatten(),
@@ -68,41 +70,59 @@ class ukfPipeline:
         return roll, pitch, yaw
 
     def quaternionMeanGD(self, quats):
-        #meaning of quats is that it is quaternion sigma points 4x2n
+        # meaning of quats is that it is quaternion sigma points 4x2n
         e = np.zeros_like(quats)
-        vectorE = np.zeros((3,quats.shape[1]))
-        itr = 0 #max Iter
+        vectorE = np.zeros((3, quats.shape[1]))
+        itr = 0  # max Iter
 
-        qt_bar = Quaternion(float(self.state[0]),self.state[1:4].flatten())
+        qt_bar = Quaternion(float(self.state[0]), self.state[1:4].flatten())
 
         qi = Quaternion()
-        while itr<50:
+        while itr < 50:
             for i in range(quats.shape[1]):
-                qi.q = quats[:,i].flatten()
-                e[:,i] = qi.__mul__(qt_bar.inv()).q
-                vectorE[:,i] = qi.__mul__(qt_bar.inv()).axis_angle().flatten()
+                qi.q = quats[:, i].flatten()
+                e[:, i] = qi.__mul__(qt_bar.inv()).q
+                vectorE[:, i] = qi.__mul__(qt_bar.inv()).axis_angle().flatten()
             eBar = vectorE.mean(axis=1)
             qt_bar.from_axis_angle(eBar)
             itr += 1
-            if np.linalg.norm(eBar)<0.01:
+            if np.linalg.norm(eBar) < 0.01:
                 break
-        return qt_bar.q,vectorE
-    
-    def stateParams(self, Yi):
-        quatMean,errVec = self.quaternionMeanGD(Yi[:4,:])
-        omegaMean = Yi[4:].mean(axis=1).reshape(-1,1)
-        mu_k = np.vstack((quatMean.reshape(-1,1),omegaMean))
-        cov = self.stateCov(errVec.mean(axis=1),errVec,Yi)        
-        return mu_k,cov
+        return qt_bar.q, vectorE
 
-    def stateCov(self,ebar,errVec,Yi):
-        ebar = ebar.reshape(-1,1)
-        omegaMean = Yi[4:].mean(axis=1).reshape(-1,1)
-        mat = (errVec-ebar) #3x6
+    def stateParams(self, Yi):
+        quatMean, errVec = self.quaternionMeanGD(Yi[:4, :])
+        omegaMean = Yi[4:].mean(axis=1).reshape(-1, 1)
+        mu_k = np.vstack((quatMean.reshape(-1, 1), omegaMean))
+        cov = self.stateCov(errVec.mean(axis=1), errVec, Yi)
+        return mu_k, cov
+
+    def stateCov(self, ebar, errVec, Yi):
+        ebar = ebar.reshape(-1, 1)
+        omegaMean = Yi[4:].mean(axis=1).reshape(-1, 1)
+        mat = (errVec-ebar)  # 3x6
         omegaCov = Yi[4:] - omegaMean
-        
-        cov = np.vstack((mat,omegaCov))
+
+        cov = np.vstack((mat, omegaCov))
         return (cov@cov.T)/Yi.shape[1]
+
+    def calculateSigmaPoints(self, Cov, mean):
+        spts = np.zeros((Cov.shape[0], Cov.shape[0] * 2))
+        spts[:, :6] = linalg.sqrtm(Cov) * np.sqrt(Cov.shape[0])
+        spts[:, 6:] = linalg.sqrtm(Cov) * np.sqrt(Cov.shape[0])
+        sptsQuat = self.cnvrtSpts2Quat(spts)
+        sptsQuat[:, :6] = mean + sptsQuat[:, :6]
+        sptsQuat[:, :6] = mean - sptsQuat[:, :6]
+        return sptsQuat, spts
+
+    def cnvrtSpts2Quat(self, spts):
+        sptsQuat = np.zeros((spts.shape[0] + 1, spts.shape[1]))
+        tmpQuat = Quaternion()
+        for i in range(spts.shape[1]):
+            tmpQuat.from_axis_angle(spts[:3, i])
+            sptsQuat[:4, i] = tmpQuat.q
+        sptsQuat[4:, :] = spts[3:, :]
+        return sptsQuat
 
     def propogateStep(self, dt):
         # Propogating Dynamics
@@ -111,7 +131,7 @@ class ukfPipeline:
         self.filterCov = self.filterCov + self.R * dt
 
         # Calculating sigma points with Quaternion inclusion
-        sgmaPts,_ = self.calculateSigmaPoints(self.filterCov, self.state)
+        sgmaPts, _ = self.calculateSigmaPoints(self.filterCov, self.state)
 
         # Doing Unscented Transform by passing through non linear function
         # Temporary Quaternions for propogating dynamics
@@ -124,29 +144,32 @@ class ukfPipeline:
             Yi[:4, i] = quatDump.__mul__(quatSigma).q
         Yi[4:, :] += sgmaPts[4:, :]
 
-        #Finding the mean and covariances
-        self.state,self.filterCov = self.stateParams(Yi)
-
-    def calculateSigmaPoints(self, Cov, mean):
-        spts = np.zeros((Cov.shape[0], Cov.shape[0] * 2))
-        spts[:, :6] = linalg.sqrtm(Cov) * np.sqrt(Cov.shape[0])
-        spts[:, 6:] = linalg.sqrtm(Cov) * np.sqrt(Cov.shape[0])
-        sptsQuat = self.cnvrtSpts2Quat(spts)
-        sptsQuat[:, :6] = mean + sptsQuat[:, :6]
-        sptsQuat[:, :6] = mean - sptsQuat[:, :6]
-        return sptsQuat,spts
-
-    def cnvrtSpts2Quat(self, spts):
-        sptsQuat = np.zeros((spts.shape[0] + 1, spts.shape[1]))
-        tmpQuat = Quaternion()
-        for i in range(spts.shape[1]):
-            tmpQuat.from_axis_angle(spts[:3, i])
-            sptsQuat[:4, i] = tmpQuat.q
-        sptsQuat[4:, :] = spts[3:, :]
-        return sptsQuat
+        # Finding the mean and covariances
+        self.state, self.filterCov = self.stateParams(Yi)
 
     def measurementStep(self):
-        pass
+        # Generate sigma points
+        sgmaPts, _ = self.calculateSigmaPoints(self.filterCov, self.state)
+        # propogate dynamics using measurement models
+
+        # Compute new mean and covariance
+
+        # Calculate innovation
+
+        # Calculate new mean and covariance
+
+    def quat2rpy(self, quat):
+        r = np.zeros((quat.shape[1],))
+        p = np.zeros((quat.shape[1],))
+        y = np.zeros((quat.shape[1],))
+        for i in range(quat.shape[1]):
+            in_q = quat[:, i].flatten()
+            q = Quaternion(float(in_q[0]), in_q[1:])
+            angles = q.euler_angles()
+            r[i] = float(angles[0])
+            p[i] = float(angles[1])
+            y[i] = float(angles[2])
+        return r, p, y
 
     def runPipeline(self):
         stateVector = self.state.copy()
@@ -174,20 +197,12 @@ def estimate_rot(data_num=1):
 
     sol = ukfPipeline(accel, gyro, T)
     stateVector = sol.runPipeline()
-    roll, pitch, yaw = stateVector
-
-
     # roll, pitch, yaw are numpy arrays of length T
-    return roll, pitch, yaw
+    return sol.quat2rpy(stateVector[:4, :])
 
 
 if __name__ == "__main__":
     estimate_rot()
-
-
-
-
-
 
     # vicon2Sens = np.array([[0, 0, 1], [1, 0, 0], [0, 1, 0]])
     # r = []
