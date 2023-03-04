@@ -74,13 +74,13 @@ class Quaternion:
              self.q[2]*other.q[1] + \
              self.q[3]*other.q[0]
         retval = Quaternion(t0, [t1, t2, t3])
+        # retval.normalize()
         return retval
 
     def __str__(self):
         return str(self.scalar()) + ', ' + str(self.vec())
 
-
-#q = Quaternion()
-#R = np.array([[1, 0, 0],[0, 0.707, -0.707],[0, 0.707, 0.707]])
-#q.from_rotm(R)
-#print q
+if __name__=="__main__":
+    q = Quaternion()
+    q.from_axis_angle([0,0,9.8])
+    print(q.q)

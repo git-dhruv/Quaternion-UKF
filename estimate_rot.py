@@ -38,6 +38,7 @@ class ukfPipeline:
         self.R = np.diag([2200, 2200, 2200, 1000, 1000, 1000])
         # Observation Noise
         self.Q = np.diag([225, 225, 225, 150, 150, 225]) / 34
+
         # This is filter covariance -> sigma_k|k
         self.filterCov = np.diag([0, 0, 0.0, 0, 0, 0])
         # Initial States are 0 degree angles -> mu_k|k
@@ -286,6 +287,8 @@ def estimate_rot(data_num=1):
 
     sol = ukfPipeline(accel, gyro, T)
     stateVector = sol.runPipeline()
+
+
     # roll, pitch, yaw are numpy arrays of length T
     return sol.quat2rpy(stateVector[:4, :])
 
@@ -293,7 +296,7 @@ def estimate_rot(data_num=1):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
-    num = 3
+    num = 2
     vicon = io.loadmat("vicon/viconRot" + str(num) + ".mat")
     roll, pitch, yaw = estimate_rot(num)
 
@@ -314,13 +317,22 @@ if __name__ == "__main__":
     plt.subplot(2, 2, 1)
     plt.plot(r[: roll.shape[0]])
     plt.plot(roll)
+    plt.legend(["Vicon","Filtered"])
+    plt.title("Roll Angle")
+    plt.ylabel("rad")
 
     plt.subplot(2, 2, 2)
     plt.plot(p[: roll.shape[0]])
     plt.plot(pitch)
+    plt.legend(["Vicon","Filtered"])
+    plt.title("Pitch Angle")
+    plt.ylabel("rad")
 
     plt.subplot(2, 2, 3)
     plt.plot(y[: roll.shape[0]])
     plt.plot(yaw)
+    plt.legend(["Vicon","Filtered"])
+    plt.title("Yaw Angle")
+    plt.ylabel("rad")
 
     plt.show()
