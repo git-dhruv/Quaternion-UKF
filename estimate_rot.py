@@ -296,7 +296,7 @@ def estimate_rot(data_num=1):
 if __name__ == "__main__":
     import matplotlib.pyplot as plt
 
-    num = 2
+    num = 1
     vicon = io.loadmat("vicon/viconRot" + str(num) + ".mat")
     roll, pitch, yaw = estimate_rot(num)
 
